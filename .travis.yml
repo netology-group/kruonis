@@ -1,0 +1,40 @@
+language: rust
+os: linux
+dist: xenial
+
+cache:
+  directories:
+    - ${TRAVIS_HOME}/.cargo
+
+before_cache:
+  - rm -rf ${TRAVIS_HOME}/.cargo/registry
+
+services:
+  - docker
+
+git:
+  depth: 1
+
+jobs:
+  include:
+    - stage: check
+      name: Format
+
+      before_install:
+        - rustup component add rustfmt
+
+      script: cargo fmt -- --check
+
+    - stage: check
+      name: Lint
+
+      before_install:
+        - rustup component add clippy
+
+      script: cargo clippy
+
+stages:
+  - name: check
+
+notifications:
+  email: false
