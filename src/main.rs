@@ -4,14 +4,13 @@ use async_std::prelude::*;
 use chrono::Utc;
 use log::info;
 use serde_json::json;
-use svc_authn::token::jws_compact;
 
 use svc_agent::{
     mqtt::{
         AgentBuilder, ConnectionMode, IntoPublishableDump, OutgoingEvent, OutgoingEventProperties,
         ShortTermTimingProperties,
     },
-    AgentId, Authenticable,
+    AgentId
 };
 
 use crate::event::Event;
@@ -28,19 +27,9 @@ async fn main() -> Result<(), String> {
     let agent_id = AgentId::new(&config.agent_label, config.id.clone());
     info!("Agent id: {:?}", &agent_id);
 
-    let token = jws_compact::TokenBuilder::new()
-        .issuer(&agent_id.as_account_id().audience().to_string())
-        .subject(&agent_id)
-        .key(config.id_token.algorithm, config.id_token.key.as_slice())
-        .build()
-        .map_err(|err| format!("Error creating an id token: {}", err))?;
-
-    let mut agent_config = config.mqtt.clone();
-    agent_config.set_password(&token);
-
     let (mut agent, _rx) = AgentBuilder::new(agent_id.clone(), API_VERSION)
         .connection_mode(ConnectionMode::Service)
-        .start(&agent_config)
+        .start(&config.mqtt)
         .map_err(|err| format!("Failed to create an agent: {}", err))?;
 
     let interval_streams: Vec<_> = config
