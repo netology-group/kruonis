@@ -10,7 +10,7 @@ use svc_agent::{
         AgentBuilder, ConnectionMode, IntoPublishableDump, OutgoingEvent, OutgoingEventProperties,
         ShortTermTimingProperties,
     },
-    AgentId
+    AgentId,
 };
 
 use crate::event::Event;
