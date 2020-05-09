@@ -51,7 +51,7 @@ pub(crate) async fn run(config: &Config) -> Result<(), String> {
 
     let (mut agent, rx) = AgentBuilder::new(agent_id.clone(), API_VERSION)
         .connection_mode(ConnectionMode::Service)
-        .start(&config.mqtt)
+        .start(&agent_config)
         .map_err(|err| format!("Failed to create an agent: {}", err))?;
 
     let (mq_tx, mq_rx) = futures::channel::mpsc::unbounded::<Notification>();
