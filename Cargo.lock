@@ -552,6 +552,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "svc-agent",
+ "svc-authn",
 ]
 
 [[package]]
@@ -1298,6 +1299,9 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7c51fec691ede0761eec4f0195ae64219da96597e4944cd3a3c229587049eae"
 dependencies = [
+ "chrono",
+ "http",
+ "jsonwebtoken",
  "serde 1.0.106",
  "serde_derive",
 ]

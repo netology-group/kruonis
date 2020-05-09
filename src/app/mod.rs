@@ -5,6 +5,7 @@ use chrono::Utc;
 use log::{error, info, warn};
 use serde_derive::Serialize;
 use serde_json::json;
+use svc_authn::token::jws_compact;
 
 use svc_agent::{
     mqtt::{
@@ -37,6 +38,16 @@ impl SubscriptionRequest {
 pub(crate) async fn run(config: &Config) -> Result<(), String> {
     let agent_id = AgentId::new(&config.agent_label, config.id.clone());
     info!("Agent id: {:?}", &agent_id);
+
+    let token = jws_compact::TokenBuilder::new()
+        .issuer(&agent_id.as_account_id().audience().to_string())
+        .subject(&agent_id)
+        .key(config.id_token.algorithm, config.id_token.key.as_slice())
+        .build()
+        .map_err(|err| format!("Error creating an id token: {}", err))?;
+
+    let mut agent_config = config.mqtt.clone();
+    agent_config.set_password(&token);
 
     let (mut agent, rx) = AgentBuilder::new(agent_id.clone(), API_VERSION)
         .connection_mode(ConnectionMode::Service)
