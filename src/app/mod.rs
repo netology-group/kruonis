@@ -64,20 +64,22 @@ pub(crate) async fn run(config: &Config) -> Result<(), String> {
         }
     });
 
+    subscribe(&mut agent, &agent_id)?;
+    spawn_subscriptions_handler(agent.clone(), mq_rx, agent_id);
+    send_events(&mut agent, &config).await?;
+    Ok(())
+}
+
+fn subscribe(agent: &mut Agent, agent_id: &AgentId) -> Result<(), String> {
     let group = SharedGroup::new("loadbalancer", agent_id.as_account_id().clone());
+
     agent
         .subscribe(
             &Subscription::multicast_requests(Some(API_VERSION)),
             QoS::AtMostOnce,
             Some(&group),
         )
-        .map_err(|err| format!("Error subscribing to multicast requests: {}", err))?;
-
-    spawn_subscriptions_handler(agent.clone(), mq_rx);
-
-    send_events(&mut agent, &config).await?;
-
-    Ok(())
+        .map_err(|err| format!("Error subscribing to multicast requests: {}", err))
 }
 
 async fn send_events(agent: &mut Agent, config: &Config) -> Result<(), String> {
@@ -120,10 +122,13 @@ async fn send_events(agent: &mut Agent, config: &Config) -> Result<(), String> {
 fn spawn_subscriptions_handler(
     agent: Agent,
     mut mq_rx: futures::channel::mpsc::UnboundedReceiver<Notification>,
+    agent_id: AgentId,
 ) {
     task::spawn(async move {
         while let Some(message) = mq_rx.next().await {
             let mut agent = agent.clone();
+            let agent_id = agent_id.clone();
+
             task::spawn(async move {
                 match message {
                     svc_agent::mqtt::Notification::Publish(message) => {
@@ -135,6 +140,16 @@ fn spawn_subscriptions_handler(
 
                         if let Err(e) = handle_subscription_request(&mut agent, &message_bytes) {
                             error!("Failed to handle subscription request: {}", e);
+                        }
+                    }
+                    svc_agent::mqtt::Notification::Disconnection => {
+                        error!("Disconnected from broker");
+                    }
+                    svc_agent::mqtt::Notification::Reconnection => {
+                        error!("Reconnected to broker");
+
+                        if let Err(err) = subscribe(&mut agent, &agent_id) {
+                            error!("Failed to resubscribe after reconnection: {}", err);
                         }
                     }
                     _ => {
