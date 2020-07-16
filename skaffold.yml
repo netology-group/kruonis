@@ -1,4 +1,4 @@
-apiVersion: skaffold/v1beta11
+apiVersion: skaffold/v2beta4
 kind: Config
 build:
   artifacts:
@@ -6,15 +6,11 @@ build:
       docker:
         dockerfile: docker/Dockerfile
   tagPolicy:
-    envTemplate:
-      template: '{{.IMAGE_NAME}}:{{.IMAGE_TAG}}'
+    gitCommit: {}
   local:
     push: true
     useDockerCLI: true
 deploy:
-  kubectl:
-    manifests:
-      - deploy/k8s/kruonis.yaml
-      - deploy/k8s/kruonis-config.yaml
-      - deploy/k8s/kruonis-environment.yaml
-      - deploy/k8s/kruonis-headless.yaml
+  kustomize:
+    paths:
+    - deploy/k8s/overlays/ns
