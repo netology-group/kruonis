@@ -12,6 +12,7 @@ pub(crate) struct Config {
     pub(crate) id_token: JwtConfig,
     pub(crate) agent_label: String,
     pub(crate) broker_id: AccountId,
+    pub(crate) svc_audience: String,
     pub(crate) mqtt: AgentConfig,
     #[serde(default)]
     pub(crate) events: HashMap<Event, u64>,

@@ -4,23 +4,22 @@ use async_std::{prelude::*, task};
 use chrono::Utc;
 use log::{error, info, warn};
 use serde_derive::Serialize;
-use serde_json::json;
+
 use svc_authn::token::jws_compact;
 
 use svc_agent::{
     mqtt::{
-        compat, Agent, AgentBuilder, ConnectionMode, IntoPublishableDump, Notification,
-        OutgoingEvent, OutgoingEventProperties, OutgoingRequest, QoS, ShortTermTimingProperties,
+        Agent, AgentBuilder, AgentNotification, ConnectionMode, IncomingMessage,
+        IntoPublishableMessage, OutgoingRequest, QoS, ShortTermTimingProperties,
     },
     Addressable, AgentId, Authenticable, SharedGroup, Subscription,
 };
 
 use crate::config::Config;
-use crate::event::Event;
 
 const API_VERSION: &str = "v1";
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct SubscriptionRequest {
     subject: AgentId,
     object: Vec<String>,
@@ -54,7 +53,7 @@ pub(crate) async fn run(config: &Config) -> Result<(), String> {
         .start(&agent_config)
         .map_err(|err| format!("Failed to create an agent: {}", err))?;
 
-    let (mq_tx, mq_rx) = futures::channel::mpsc::unbounded::<Notification>();
+    let (mq_tx, mq_rx) = futures::channel::mpsc::unbounded::<AgentNotification>();
 
     std::thread::spawn(move || {
         for message in rx {
@@ -93,26 +92,19 @@ async fn send_events(agent: &mut Agent, config: &Config) -> Result<(), String> {
 
     let mut interval_stream = futures::stream::select_all(interval_streams);
     while let Some(event) = interval_stream.next().await {
-        let timing = ShortTermTimingProperties::new(Utc::now());
-        let props = match event {
-            Event::SystemVacuum => OutgoingEventProperties::new("system.vacuum", timing),
-            Event::MetricPull => OutgoingEventProperties::new("metric.pull", timing),
-        };
-        let event = OutgoingEvent::broadcast(json!({}), props, "events");
-        let message = Box::new(event) as Box<dyn IntoPublishableDump + Send>;
-
-        let dump = message
+        let message = event
+            .into_message(config)
             .into_dump(agent.address())
             .map_err(|err| format!("Failed to dump message: {}", err))?;
 
         info!(
             "Outgoing message = '{}' sending to the topic = '{}'",
-            dump.payload(),
-            dump.topic(),
+            message.payload(),
+            message.topic(),
         );
 
         agent
-            .publish_dump(dump.clone())
+            .publish_dump(message)
             .map_err(|err| format!("Failed to publish message: {}", err))?;
     }
 
@@ -121,7 +113,7 @@ async fn send_events(agent: &mut Agent, config: &Config) -> Result<(), String> {
 
 fn spawn_subscriptions_handler(
     agent: Agent,
-    mut mq_rx: futures::channel::mpsc::UnboundedReceiver<Notification>,
+    mut mq_rx: futures::channel::mpsc::UnboundedReceiver<AgentNotification>,
     agent_id: AgentId,
 ) {
     task::spawn(async move {
@@ -131,21 +123,20 @@ fn spawn_subscriptions_handler(
 
             task::spawn(async move {
                 match message {
-                    svc_agent::mqtt::Notification::Publish(message) => {
-                        let message_bytes = message.payload;
-                        info!(
-                            "Incoming message = '{}'",
-                            String::from_utf8_lossy(&message_bytes)
-                        );
+                    svc_agent::mqtt::AgentNotification::Message(Ok(message), _message_data) => {
+                        info!("Incoming message = '{:?}'", message);
 
-                        if let Err(e) = handle_subscription_request(&mut agent, &message_bytes) {
+                        if let Err(e) = handle_subscription_request(&mut agent, message) {
                             error!("Failed to handle subscription request: {}", e);
                         }
                     }
-                    svc_agent::mqtt::Notification::Disconnection => {
+                    svc_agent::mqtt::AgentNotification::Message(Err(err), _message_data) => {
+                        error!("Error parsing incoming message: {}", err);
+                    }
+                    svc_agent::mqtt::AgentNotification::Disconnection => {
                         error!("Disconnected from broker");
                     }
-                    svc_agent::mqtt::Notification::Reconnection => {
+                    svc_agent::mqtt::AgentNotification::Reconnection => {
                         error!("Reconnected to broker");
 
                         if let Err(err) = subscribe(&mut agent, &agent_id) {
@@ -161,14 +152,16 @@ fn spawn_subscriptions_handler(
     });
 }
 
-fn handle_subscription_request(agent: &mut Agent, message_bytes: &[u8]) -> Result<(), String> {
+fn handle_subscription_request<T: std::fmt::Debug>(
+    agent: &mut Agent,
+    message: IncomingMessage<T>,
+) -> Result<(), String> {
     let start_timestamp = Utc::now();
 
-    let envelope = serde_json::from_slice::<compat::IncomingEnvelope>(&message_bytes)
-        .map_err(|err| format!("Failed to parse incoming envelope: {}", err))?;
+    match message {
+        IncomingMessage::Request(req) => {
+            let reqp = req.properties();
 
-    match envelope.properties() {
-        compat::IncomingEnvelopeProperties::Request(ref reqp) => {
             match reqp.method() {
                 "kruonis.subscribe" => {
                     let payload =
@@ -193,20 +186,20 @@ fn handle_subscription_request(agent: &mut Agent, message_bytes: &[u8]) -> Resul
                     //        Then we won't need the local state on the broker at all and will be able
                     //        to send a multicast request to the broker.
                     let outgoing_request =
-                        OutgoingRequest::unicast(payload, props, reqp, API_VERSION);
-                    let message = Box::new(outgoing_request) as Box<dyn IntoPublishableDump + Send>;
-                    let dump = message
+                        OutgoingRequest::unicast(payload.clone(), props, reqp, API_VERSION);
+
+                    let message = Box::new(outgoing_request)
                         .into_dump(agent.address())
                         .map_err(|err| format!("Failed to dump message: {}", err))?;
 
                     info!(
-                        "Outgoing message = '{}' sending to the topic = '{}'",
-                        dump.payload(),
-                        dump.topic(),
+                        "Outgoing message = '{:?}' sending to the topic = '{}'",
+                        message.payload(),
+                        message.topic(),
                     );
 
                     agent
-                        .publish_dump(dump)
+                        .publish_dump(message)
                         .map_err(|err| format!("Failed to publish message: {}", err))
                 }
                 method => {
