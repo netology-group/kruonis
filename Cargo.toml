@@ -15,6 +15,7 @@ serde_json = "1.0"
 env_logger = "0.7"
 log = "0.4"
 
-svc-agent = { version = "0.12" }
-svc-authn = { version = "0.5", features = ["jose"] }
+svc-agent = { version = "0.14" }
+svc-authn = { version = "0.6", features = ["jose"] }
 futures = "0.3.4"
+

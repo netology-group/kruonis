@@ -1,6 +1,7 @@
 id = "kruonis.dev.svc.example.org"
 agent_label = "kr-0"
 broker_id = "mqtt-gateway.dev.svc.example.org"
+svc_audience = "dev.svc.example.org"
 
 [id_token]
 algorithm = "ES256"
@@ -11,5 +12,6 @@ uri = "mqtt://0.0.0.0:1883"
 clean_session = true
 
 [events]
-"system.vacuum" = 60
 "metric.pull" = 5
+"system.vacuum" = 60
+"room.notify_opened" = 60
