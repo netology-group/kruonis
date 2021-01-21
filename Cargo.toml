@@ -1,6 +1,6 @@
 [package]
 name = "kruonis"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Shamir Khodzha <khodzha.sh@gmail.com>"]
 edition = "2018"
 
