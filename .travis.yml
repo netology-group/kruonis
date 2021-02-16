@@ -2,12 +2,7 @@ language: rust
 os: linux
 dist: xenial
 
-cache:
-  directories:
-    - ${TRAVIS_HOME}/.cargo
-
-before_cache:
-  - rm -rf ${TRAVIS_HOME}/.cargo/registry
+cache: cargo
 
 services:
   - docker
@@ -33,8 +28,25 @@ jobs:
 
       script: cargo clippy
 
+    # Note: there isn't any doc yet.
+    # - stage: build
+    #   name: Docs
+    #   install: cargo install mdbook --vers ^0.4
+    #   script:
+    #     - ./deploy.init.sh
+    #     - mdbook build docs
+    #     - ./deploy/ci-mdbook.sh
+    - stage: build
+      name: Build
+      script:
+        - ./deploy.init.sh
+        - ./deploy/ci-install-tools.sh
+        - ./deploy/ci-build.sh
+
 stages:
   - name: check
+  - name: build
+    if: branch = master AND type = push
 
 notifications:
   email: false
