@@ -9,6 +9,8 @@ use svc_agent::{
 
 use crate::config::Config;
 
+const CONFERENCE_API_VERSION: &str = "v2";
+
 #[derive(Debug, Default, Serialize)]
 struct Payload {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -49,16 +51,18 @@ impl Event {
                 let props = build_props("metric.pull");
                 Box::new(OutgoingEvent::broadcast(payload, props, "events"))
             }
-            Self::SystemVacuum => {
-                let props = build_props("system.vacuum");
-                let to = svc_account(config, "conference");
-                Box::new(OutgoingEvent::multicast(payload, props, &to))
-            }
-            Self::RoomNotifyOpened => {
-                let props = build_props("room.notify_opened");
-                let to = svc_account(config, "conference");
-                Box::new(OutgoingEvent::multicast(payload, props, &to))
-            }
+            Self::SystemVacuum => Box::new(OutgoingEvent::multicast(
+                payload,
+                build_props("system.vacuum"),
+                &svc_account(config, "conference"),
+                CONFERENCE_API_VERSION,
+            )),
+            Self::RoomNotifyOpened => Box::new(OutgoingEvent::multicast(
+                payload,
+                build_props("room.notify_opened"),
+                &svc_account(config, "conference"),
+                CONFERENCE_API_VERSION,
+            )),
         }
     }
 }
