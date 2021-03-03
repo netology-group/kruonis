@@ -1,38 +1,18 @@
 use std::time::Duration;
 
 use async_std::{prelude::*, task};
-use chrono::Utc;
 use log::{error, info, warn};
-use serde_derive::Serialize;
 
 use svc_authn::token::jws_compact;
 
 use svc_agent::{
-    mqtt::{
-        Agent, AgentBuilder, AgentNotification, ConnectionMode, IncomingMessage,
-        IntoPublishableMessage, OutgoingRequest, QoS, ShortTermTimingProperties,
-    },
-    Addressable, AgentId, Authenticable, SharedGroup, Subscription,
+    mqtt::{Agent, AgentBuilder, AgentNotification, ConnectionMode, QoS},
+    AccountId, AgentId, Authenticable, SharedGroup, Subscription,
 };
 
 use crate::config::Config;
 
 const API_VERSION: &str = "v1";
-
-#[derive(Clone, Debug, Serialize)]
-struct SubscriptionRequest {
-    subject: AgentId,
-    object: Vec<String>,
-}
-
-impl SubscriptionRequest {
-    fn new(subject: AgentId, object: Vec<&str>) -> Self {
-        Self {
-            subject,
-            object: object.iter().map(|&s| s.into()).collect(),
-        }
-    }
-}
 
 pub(crate) async fn run(config: &Config) -> Result<(), String> {
     let agent_id = AgentId::new(&config.agent_label, config.id.clone());
@@ -64,7 +44,7 @@ pub(crate) async fn run(config: &Config) -> Result<(), String> {
     });
 
     subscribe(&mut agent, &agent_id)?;
-    spawn_subscriptions_handler(agent.clone(), mq_rx, agent_id);
+    spawn_subscriptions_handler(agent.clone(), mq_rx, agent_id, config.broker_id.clone());
     send_events(&mut agent, &config).await?;
     Ok(())
 }
@@ -115,19 +95,25 @@ fn spawn_subscriptions_handler(
     agent: Agent,
     mut mq_rx: futures::channel::mpsc::UnboundedReceiver<AgentNotification>,
     agent_id: AgentId,
+    broker_id: AccountId,
 ) {
     task::spawn(async move {
         while let Some(message) = mq_rx.next().await {
             let mut agent = agent.clone();
-            let agent_id = agent_id.clone();
+            let agent_id_ = agent_id.clone();
+            let broker_id_ = broker_id.clone();
 
             task::spawn(async move {
                 match message {
                     svc_agent::mqtt::AgentNotification::Message(Ok(message), _message_data) => {
                         info!("Incoming message = '{:?}'", message);
 
-                        if let Err(e) = handle_subscription_request(&mut agent, message) {
-                            error!("Failed to handle subscription request: {}", e);
+                        if let Err(e) = message_handler::handle_subscription_request(
+                            &mut agent, message, agent_id_, broker_id_,
+                        )
+                        .await
+                        {
+                            error!("Failed to handle message, reason = {:?}", e);
                         }
                     }
                     svc_agent::mqtt::AgentNotification::Message(Err(err), _message_data) => {
@@ -139,10 +125,11 @@ fn spawn_subscriptions_handler(
                     svc_agent::mqtt::AgentNotification::Reconnection => {
                         error!("Reconnected to broker");
 
-                        if let Err(err) = subscribe(&mut agent, &agent_id) {
+                        if let Err(err) = subscribe(&mut agent, &agent_id_) {
                             error!("Failed to resubscribe after reconnection: {}", err);
                         }
                     }
+                    svc_agent::mqtt::AgentNotification::Puback(_) => {}
                     _ => {
                         warn!("Unsupported notification type = '{:?}'", message);
                     }
@@ -152,65 +139,4 @@ fn spawn_subscriptions_handler(
     });
 }
 
-fn handle_subscription_request<T: std::fmt::Debug>(
-    agent: &mut Agent,
-    message: IncomingMessage<T>,
-) -> Result<(), String> {
-    let start_timestamp = Utc::now();
-
-    match message {
-        IncomingMessage::Request(req) => {
-            let reqp = req.properties();
-
-            match reqp.method() {
-                "kruonis.subscribe" => {
-                    let payload =
-                        SubscriptionRequest::new(reqp.as_agent_id().to_owned(), vec!["events"]);
-
-                    let short_term_timing = ShortTermTimingProperties::until_now(start_timestamp);
-
-                    let props = reqp.to_request(
-                        "subscription.create",
-                        reqp.response_topic(),
-                        reqp.correlation_data(),
-                        short_term_timing,
-                    );
-
-                    // FIXME: It looks like sending a request to the client but the broker intercepts it
-                    //        creates a subscription and replaces the request with the response.
-                    //        This is kind of ugly but it guaranties that the request will be processed by
-                    //        the broker node where the client is connected to. We need that because
-                    //        the request changes local state on that node.
-                    //        A better solution will be possible after resolution of this issue:
-                    //        https://github.com/vernemq/vernemq/issues/1326.
-                    //        Then we won't need the local state on the broker at all and will be able
-                    //        to send a multicast request to the broker.
-                    let outgoing_request =
-                        OutgoingRequest::unicast(payload.clone(), props, reqp, API_VERSION);
-
-                    let message = Box::new(outgoing_request)
-                        .into_dump(agent.address())
-                        .map_err(|err| format!("Failed to dump message: {}", err))?;
-
-                    info!(
-                        "Outgoing message = '{:?}' sending to the topic = '{}'",
-                        message.payload(),
-                        message.topic(),
-                    );
-
-                    agent
-                        .publish_dump(message)
-                        .map_err(|err| format!("Failed to publish message: {}", err))
-                }
-                method => {
-                    warn!("Unexpected request method: {:?}", method);
-                    Ok(())
-                }
-            }
-        }
-        val => {
-            warn!("Unexpected message type: {:?}", val);
-            Ok(())
-        }
-    }
-}
+mod message_handler;
