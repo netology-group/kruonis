@@ -1,4 +1,3 @@
-use config;
 use serde_derive::Deserialize;
 use std::collections::HashMap;
 use svc_agent::{mqtt::AgentConfig, AccountId};
