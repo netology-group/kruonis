@@ -2,7 +2,7 @@ apiVersion: skaffold/v2beta11
 kind: Config
 build:
   artifacts:
-  - image: netologygroup/kruonis
+  - image: foxford/kruonis
     docker:
       dockerfile: docker/Dockerfile
   tagPolicy:
