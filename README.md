@@ -1,10 +1,5 @@
 # Kruonis
 
-[![Build Status][travis-img]][travis]
-
-[travis]:https://travis-ci.com/netology-group/kruonis?branch=master
-[travis-img]:https://travis-ci.com/netology-group/kruonis.png?branch=master
-
 Sends empty events at given intervals. Like cron but for mqtt events.
 
 You need to send a `kruonis.subscribe` request to subscribe to these events:
